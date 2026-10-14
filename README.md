@@ -1,8 +1,10 @@
 # Kidzone
 
+A small open-source playground where kids make web games and creative tools with a trusted adult.
+
 Play it: https://jozecuervo.github.io/kidzone/
 
-Kidzone is a small open-source playground where kids make web games, creative tools and playful experiments, with help from a parent or trusted adult. Built by Jose Miguel Hernandez (https://jose.io) with dezi-bot and a crew of young game designers.
+Built by Jose Miguel Hernandez (https://jose.io) with dezi-bot and a crew of young game designers.
 
 The projects are meant to be simple enough to open, read, change, and share.
 Most of them use plain HTML, CSS, and JavaScript, so a first contribution can be
