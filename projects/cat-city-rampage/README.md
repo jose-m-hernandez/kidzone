@@ -47,4 +47,3 @@ All graphics are hand-coded (no external images):
 - Add power-ups (speed boost, bigger destroy radius)
 - Add cat customization/skins
 - Add sound effects (destruction sounds, victory chime)
-- Multiplayer online play (future consideration)

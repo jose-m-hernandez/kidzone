@@ -220,7 +220,75 @@ kbd {
     font-size: 0.75rem;
   }
 
+  .game-wrapper {
+    padding: 0.5rem 1rem;
+  }
+
+  .game-header {
+    margin-bottom: 0.25rem;
+  }
+
+  .back-link {
+    margin-bottom: 0.1rem;
+    font-size: 0.85rem;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+  }
+
+  .subtitle {
+    margin-top: 0.1rem;
+    font-size: 0.85rem;
+  }
+
+  #gameCanvas {
+    margin: 0.5rem auto;
+  }
+
+  .game-status {
+    min-height: 0;
+    margin: 0.5rem 0;
+    gap: 0.35rem;
+  }
+
+  #statusText {
+    font-size: 0.9rem;
+  }
+
+  .reset-btn {
+    padding: 0.4rem 1.25rem;
+  }
+
   .touch-controls {
-    grid-template-columns: 1fr;
+    gap: 0.5rem;
+    margin: 0.5rem 0;
+  }
+
+  .touch-pad {
+    padding: 0.4rem;
+  }
+
+  .touch-pad h3 {
+    margin-bottom: 0.3rem;
+    text-align: center;
+  }
+
+  .touch-row {
+    gap: 0.25rem;
+    margin-bottom: 0.25rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reset-btn {
+    transition: none;
+  }
+
+  .reset-btn:hover,
+  .reset-btn:active,
+  .touch-pad button:active,
+  .touch-pad button[aria-pressed="true"] {
+    transform: none;
   }
 }

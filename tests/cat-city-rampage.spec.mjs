@@ -117,3 +117,84 @@ test("reaching the yarn ends the round and focuses replay", async ({ page }) => 
   await expect(page.locator("#statusText")).toHaveText("Player 1 grabbed the yarn!");
   await expect(page.getByRole("button", { name: "Play Again" })).toBeFocused();
 });
+
+test.describe("phone and accessibility", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  const buttonNames = [
+    "Red Cat move left",
+    "Red Cat jump",
+    "Red Cat move right",
+    "Red Cat smash bricks",
+    "Blue Cat move left",
+    "Blue Cat jump",
+    "Blue Cat move right",
+    "Blue Cat smash bricks"
+  ];
+
+  test("phone layout keeps the canvas and both pads in view", async ({ page }) => {
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+    const boxes = [{ name: "canvas", box: await page.locator("#gameCanvas").boundingBox() }];
+    for (const name of buttonNames) {
+      boxes.push({ name, box: await page.getByRole("button", { name }).boundingBox() });
+    }
+
+    for (const { name, box } of boxes) {
+      expect(box, name).not.toBeNull();
+      expect(box.y, `${name} top`).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height, `${name} bottom`).toBeLessThanOrEqual(844);
+      expect(box.x, `${name} left`).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, `${name} right`).toBeLessThanOrEqual(390);
+      if (name !== "canvas") {
+        expect(box.width, `${name} width`).toBeGreaterThanOrEqual(44);
+        expect(box.height, `${name} height`).toBeGreaterThanOrEqual(44);
+      }
+    }
+
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(scrollWidth).toBeLessThanOrEqual(390);
+  });
+
+  test("real touch holds move each cat and release on lift", async ({ page }) => {
+    const cdp = await page.context().newCDPSession(page);
+
+    async function hold(name) {
+      const box = await page.getByRole("button", { name }).boundingBox();
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      await page.waitForTimeout(400);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    }
+
+    const start = await state(page);
+
+    await hold("Blue Cat move left");
+    const afterBlue = await state(page);
+    expect(afterBlue.players[1].x).toBeLessThan(start.players[1].x - 8);
+    expect(afterBlue.players[1].keys.left).toBe(false);
+
+    await hold("Red Cat move right");
+    const afterRed = await state(page);
+    expect(afterRed.players[0].x).toBeGreaterThan(start.players[0].x + 8);
+    expect(afterRed.players[0].keys.right).toBe(false);
+  });
+
+  test("reduced motion: no button transitions, game still plays", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.reload();
+
+    const durations = await page.evaluate(() => [
+      getComputedStyle(document.querySelector("#resetButton")).transitionDuration,
+      getComputedStyle(document.querySelector(".touch-pad button")).transitionDuration
+    ]);
+    expect(durations).toEqual(["0s", "0s"]);
+
+    const start = await state(page);
+    await page.keyboard.down("d");
+    await page.waitForTimeout(300);
+    await page.keyboard.up("d");
+    expect((await state(page)).players[0].x).toBeGreaterThan(start.players[0].x);
+  });
+});
