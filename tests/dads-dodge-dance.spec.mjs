@@ -8,6 +8,13 @@ async function aimAtDad(page) {
   await page.mouse.click(dadBox.x + dadBox.width / 2, dadBox.y + dadBox.height / 2);
 }
 
+// Tosses must miss Dad, or 6 random splashes win the level and Reload never appears.
+async function tossAtMissPoint(page) {
+  const stageBox = await page.locator("#stage").boundingBox();
+  if (!stageBox) throw new Error("Stage is not visible");
+  await page.mouse.click(stageBox.x + stageBox.width * 0.5, stageBox.y + stageBox.height * 0.14);
+}
+
 test.describe("Dad's Dodge Dance lifecycle", () => {
   test("reset invalidates an in-flight toss", async ({ page }) => {
     await page.goto(gameUrl);
@@ -23,9 +30,12 @@ test.describe("Dad's Dodge Dance lifecycle", () => {
   test("reset invalidates a pending reload", async ({ page }) => {
     await page.goto(gameUrl);
     for (let toss = 0; toss < 10; toss += 1) {
-      await page.getByRole("button", { name: "Toss balloon" }).click();
+      await tossAtMissPoint(page);
       await page.waitForTimeout(450);
     }
+    await expect(page.locator("#ammo-count")).toHaveText("0");
+    await expect(page.locator("#splash-meter")).toHaveAttribute("aria-valuenow", "0");
+    await expect(page.locator("#stage")).toHaveAttribute("data-phase", "playing");
     await page.getByRole("button", { name: "Reload" }).click();
     await expect(page.locator("#stage")).toHaveAttribute("data-phase", "reloading");
     await page.getByRole("button", { name: "Reset" }).click();
