@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
 const gamePath = "/projects/cat-city-rampage/";
@@ -196,5 +197,25 @@ test.describe("phone and accessibility", () => {
     await page.waitForTimeout(300);
     await page.keyboard.up("d");
     expect((await state(page)).players[0].x).toBeGreaterThan(start.players[0].x);
+  });
+});
+
+test.describe("shelf and work-in-progress", () => {
+  test("the landing shelf does not list Cat City Rampage", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator("[data-project-count]")).toHaveText(/projects? ready/);
+    await expect(page.locator('[data-project-grid] a[href*="cat-city-rampage"]')).toHaveCount(0);
+    expect(await page.locator('[data-project-grid] a[href*="haunted-maze"]').count()).toBeGreaterThanOrEqual(1);
+
+    const indexPath = new URL("../projects/index.json", import.meta.url);
+    const index = JSON.parse(await readFile(indexPath, "utf8"));
+    const entries = Array.isArray(index) ? index : index.projects;
+    const entry = entries.find((project) => JSON.stringify(project).includes("cat-city-rampage"));
+    expect(entry).toBeTruthy();
+    expect(entry.shelf).toBe(false);
+  });
+
+  test("the game page says it is a work in progress", async ({ page }) => {
+    await expect(page.getByText("Work in progress: this game is still being built.")).toBeVisible();
   });
 });

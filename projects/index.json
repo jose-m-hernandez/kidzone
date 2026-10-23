@@ -104,7 +104,7 @@
         "physics"
       ],
       "order": 70,
-      "shelf": true,
+      "shelf": false,
       "ageRange": "7-12",
       "interaction": [
         "keyboard",

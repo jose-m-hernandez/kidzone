@@ -1,5 +1,7 @@
 # Cat City Rampage
 
+Status: work in progress. It is in the repo but not on the Kidzone shelf yet.
+
 Two mischievous cats race up a skyscraper, smashing and clawing their way to the top to grab the yarn ball.
 
 ## How to Play
