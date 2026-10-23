@@ -22,20 +22,26 @@ test("the nested start button keeps native keyboard activation", async ({ page }
 });
 
 test("a released brush cannot leak its delayed stroke into the next hold", async ({ page }) => {
+  // Freeze the page's clock so time moves only on runFor.
+  await page.clock.install({ time: 0 });
+  await page.goto(gamePath);
+  await page.clock.pauseAt(20_000);
   await startGameWithKeyboard(page);
   const stage = page.locator("#catStage");
   const strokes = page.locator("#strokeCount");
 
   await stage.focus();
+  // The fake clock makes hold lengths exact, so tracing or a slow machine can't stretch them.
   await page.keyboard.down("Space");
-  await page.waitForTimeout(100);
+  await page.clock.runFor(100);
   await page.keyboard.up("Space");
-  await page.waitForTimeout(60);
+  await page.clock.runFor(60);
   await page.keyboard.down("Space");
-  await page.waitForTimeout(100);
+  await page.clock.runFor(100);
 
   await expect(strokes).toHaveText("0");
-  await expect.poll(async () => Number(await strokes.textContent())).toBeGreaterThan(0);
+  await page.clock.runFor(200);
+  await expect(strokes).toHaveText("1");
   await page.keyboard.up("Space");
 });
 
