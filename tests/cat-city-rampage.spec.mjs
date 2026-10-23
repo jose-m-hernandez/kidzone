@@ -186,11 +186,16 @@ test.describe("phone and accessibility", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.reload();
 
-    const durations = await page.evaluate(() => [
-      getComputedStyle(document.querySelector("#resetButton")).transitionDuration,
-      getComputedStyle(document.querySelector(".touch-pad button")).transitionDuration
-    ]);
-    expect(durations).toEqual(["0s", "0s"]);
+    const resetDuration = await page.evaluate(
+      () => getComputedStyle(document.querySelector("#resetButton")).transitionDuration
+    );
+    expect(resetDuration).toBe("0s");
+
+    const jump = page.getByRole("button", { name: "Red Cat jump" });
+    await jump.dispatchEvent("pointerdown", { pointerId: 1, pointerType: "touch" });
+    await expect(jump).toHaveAttribute("aria-pressed", "true");
+    expect(await jump.evaluate((node) => getComputedStyle(node).transform)).toBe("none");
+    await jump.dispatchEvent("pointerup", { pointerId: 1, pointerType: "touch" });
 
     const start = await state(page);
     await page.keyboard.down("d");
@@ -210,7 +215,7 @@ test.describe("shelf and work-in-progress", () => {
     const indexPath = new URL("../projects/index.json", import.meta.url);
     const index = JSON.parse(await readFile(indexPath, "utf8"));
     const entries = Array.isArray(index) ? index : index.projects;
-    const entry = entries.find((project) => JSON.stringify(project).includes("cat-city-rampage"));
+    const entry = entries.find((project) => project.slug === "cat-city-rampage");
     expect(entry).toBeTruthy();
     expect(entry.shelf).toBe(false);
   });
