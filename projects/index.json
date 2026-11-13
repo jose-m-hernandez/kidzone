@@ -89,22 +89,22 @@
       }
     },
     {
-      "slug": "cat-city-rampage",
-      "title": "Cat City Rampage",
+      "slug": "cat-city-mayhem",
+      "title": "Cat City Mayhem",
       "description": "Race your friend's cat up a crumbling building. Destroy walls to create paths and be the first to reach the yarn ball at the top!",
       "date": "2026-07-27",
       "dateSource": "project creation",
       "summary": "Two mischievous cats race to grab the yarn at the top of a skyscraper, smashing and clawing their way up.",
-      "href": "./projects/cat-city-rampage/",
+      "href": "./projects/cat-city-mayhem/",
       "entry": "index.html",
-      "cta": "Start Rampage",
+      "cta": "Start Mayhem",
       "tags": [
         "arcade",
         "competitive",
         "physics"
       ],
       "order": 70,
-      "shelf": false,
+      "shelf": true,
       "ageRange": "7-12",
       "interaction": [
         "keyboard",
@@ -507,6 +507,37 @@
         "privacy": "Local-only play with no accounts, chat, sharing, or saved data.",
         "adultHelp": "Adult help may be useful for younger players practicing arithmetic.",
         "notes": "Wrong answers reduce yarn, so a gentler mode may be a future improvement."
+      },
+      "runtime": {
+        "type": "static",
+        "requiresServer": false,
+        "networkAccess": "none",
+        "storesData": false,
+        "externalDependencies": []
+      }
+    },
+    {
+      "slug": "cat-city-rampage",
+      "title": "Cat City Mayhem (old address)",
+      "description": "This old address opens Cat City Mayhem.",
+      "date": null,
+      "dateSource": "project metadata",
+      "summary": "This old address opens Cat City Mayhem.",
+      "href": "./projects/cat-city-rampage/",
+      "entry": "index.html",
+      "cta": "Open project",
+      "tags": [],
+      "order": 999,
+      "shelf": false,
+      "ageRange": "7-12",
+      "interaction": [
+        "keyboard",
+        "touch"
+      ],
+      "safety": {
+        "privacy": "Local-only play with no accounts, chat, sharing, or saved data.",
+        "adultHelp": "None required.",
+        "notes": "Forwards to Cat City Mayhem; it has no content of its own."
       },
       "runtime": {
         "type": "static",

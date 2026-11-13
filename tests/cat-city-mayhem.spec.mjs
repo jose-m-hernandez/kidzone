@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
-const gamePath = "/projects/cat-city-rampage/";
+const gamePath = "/projects/cat-city-mayhem/";
 
 async function waitForAnimationFrames(page, frameCount = 6) {
   await page.evaluate(
@@ -23,7 +23,7 @@ async function waitForAnimationFrames(page, frameCount = 6) {
 
 async function state(page) {
   return page.evaluate(() => {
-    const game = window.__catCityRampage;
+    const game = window.__catCityMayhem;
     return {
       running: game.game.running,
       won: game.game.won,
@@ -85,7 +85,7 @@ test("touch controls move the selected cat and release on cancellation", async (
 
 test("smashing removes nearby bricks once per press", async ({ page }) => {
   await page.evaluate(() => {
-    const game = window.__catCityRampage;
+    const game = window.__catCityMayhem;
     const player = game.players[0];
     const target = game.bricks.find((brick) => brick.y === 520);
     player.x = target.x;
@@ -106,7 +106,7 @@ test("smashing removes nearby bricks once per press", async ({ page }) => {
 
 test("reaching the yarn ends the round and focuses replay", async ({ page }) => {
   await page.evaluate(() => {
-    const game = window.__catCityRampage;
+    const game = window.__catCityMayhem;
     const player = game.players[0];
     player.x = 400;
     player.y = 40;
@@ -205,22 +205,47 @@ test.describe("phone and accessibility", () => {
   });
 });
 
-test.describe("shelf and work-in-progress", () => {
-  test("the landing shelf does not list Cat City Rampage", async ({ page }) => {
+test.describe("shelf, name and old address", () => {
+  test("the landing shelf lists Cat City Mayhem once", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("[data-project-count]")).toHaveText(/projects? ready/);
+    await expect(page.locator('[data-project-grid] a[href*="cat-city-mayhem"]')).toHaveCount(1);
     await expect(page.locator('[data-project-grid] a[href*="cat-city-rampage"]')).toHaveCount(0);
     expect(await page.locator('[data-project-grid] a[href*="haunted-maze"]').count()).toBeGreaterThanOrEqual(1);
 
     const indexPath = new URL("../projects/index.json", import.meta.url);
     const index = JSON.parse(await readFile(indexPath, "utf8"));
     const entries = Array.isArray(index) ? index : index.projects;
-    const entry = entries.find((project) => project.slug === "cat-city-rampage");
+    const entry = entries.find((project) => project.slug === "cat-city-mayhem");
     expect(entry).toBeTruthy();
-    expect(entry.shelf).toBe(false);
+    expect(entry.shelf).toBe(true);
+
+    const oldEntry = entries.find((project) => project.slug === "cat-city-rampage");
+    expect(oldEntry).toBeTruthy();
+    expect(oldEntry.shelf).toBe(false);
+    expect(oldEntry.title).not.toMatch(/rampage/i);
   });
 
-  test("the game page says it is a work in progress", async ({ page }) => {
-    await expect(page.getByText("Work in progress: this game is still being built.")).toBeVisible();
+  test("the game page has no work-in-progress note", async ({ page }) => {
+    await expect(page.locator("#gameCanvas")).toBeVisible();
+    await expect(page.getByText("Work in progress: this game is still being built.")).toHaveCount(0);
+  });
+
+  test("the new address serves the game as Cat City Mayhem", async ({ page }) => {
+    await expect(page).toHaveTitle("Cat City Mayhem");
+    await expect(page.getByRole("heading", { level: 1, name: "Cat City Mayhem", exact: true })).toBeVisible();
+    expect(await page.locator("body").innerText()).not.toMatch(/rampage/i);
+  });
+
+  test("the old address still answers and leads to the game", async ({ page }) => {
+    const response = await page.goto("/projects/cat-city-rampage/");
+    expect(response.status()).toBe(200);
+    await expect(page).toHaveURL(/\/projects\/cat-city-mayhem\/$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Cat City Mayhem", exact: true })).toBeVisible();
+
+    const raw = await page.request.get("/projects/cat-city-rampage/");
+    const body = await raw.text();
+    expect(body).toContain('href="../cat-city-mayhem/"');
+    expect(body).not.toMatch(/rampage/i);
   });
 });
