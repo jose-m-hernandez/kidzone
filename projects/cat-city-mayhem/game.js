@@ -1,4 +1,4 @@
-// Cat City Rampage - Two cats race to grab the yarn at the top.
+// Cat City Mayhem - Two cats race to grab the yarn at the top.
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas?.getContext("2d");
@@ -7,7 +7,7 @@ const resetButton = document.getElementById("resetButton");
 const touchButtons = document.querySelectorAll("[data-player][data-control]");
 
 if (!canvas || !ctx || !statusText || !resetButton) {
-  throw new Error("Cat City Rampage is missing required page elements.");
+  throw new Error("Cat City Mayhem is missing required page elements.");
 }
 
 const STEP_MS = 1000 / 60;
@@ -418,7 +418,7 @@ document.addEventListener("visibilitychange", () => {
 
 resetButton.addEventListener("click", reset);
 
-window.__catCityRampage = {
+window.__catCityMayhem = {
   game,
   players: [player1, player2],
   get bricks() {
