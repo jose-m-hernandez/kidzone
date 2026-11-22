@@ -58,7 +58,8 @@
             margin-top: 12px;
             touch-action: none;
         }
-        .touch-control {
+        .touch-control,
+        .editor-button {
             min-height: 56px;
             border: 4px solid #a0a0a0;
             border-radius: 8px;
@@ -72,9 +73,78 @@
             user-select: none;
         }
         .touch-control.is-pressed,
-        .touch-control:active {
+        .touch-control:active,
+        .editor-button:active {
             transform: translateY(3px);
             box-shadow: 0 2px 0 #8f7524;
+        }
+        .editor-button[aria-pressed="true"] {
+            background: #fff6b0;
+            border-color: #05b8d8;
+        }
+        .editor-grid {
+            display: none;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .editor-heading {
+            grid-column: 1 / -1;
+            color: #cca030;
+            font-size: 16px;
+            text-align: left;
+        }
+        #levelList {
+            display: none;
+            list-style: none;
+            margin-top: 12px;
+        }
+        #levelList li {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            color: #ffd700;
+            font-size: 18px;
+        }
+        #levelList .level-name {
+            flex: 1 1 100%;
+            text-align: left;
+        }
+        #levelList .editor-button {
+            flex: 1 1 100px;
+        }
+        #editorStatus {
+            min-height: 24px;
+            margin-top: 10px;
+            color: #fff6b0;
+            font-size: 16px;
+        }
+        /* The pinned status bar covers the bottom of the screen in edit view: leave room under the last button,
+           and let anything scrolled into view stop above the bar. */
+        html {
+            scroll-padding-bottom: 80px;
+        }
+        body[data-view="edit"] .editor-grid {
+            padding-bottom: 12px;
+        }
+        body[data-view="edit"] #editorStatus:not(:empty) {
+            position: sticky;
+            bottom: 0;
+            z-index: 5;
+            padding: 10px 12px;
+            background: #1a2a3a;
+            border-top: 2px solid #cca030;
+        }
+        body[data-view="play-seeded"] .only-seeded,
+        body[data-view="play-custom"] .only-custom,
+        body[data-view="edit"] .only-edit,
+        body[data-view="list"] .only-list {
+            display: grid;
+        }
+        body[data-view="list"] #levelList {
+            display: block;
         }
         h1 {
             color: #ffd700;
@@ -85,6 +155,10 @@
             .touch-controls {
                 display: grid;
             }
+        }
+        body[data-view="edit"] .touch-controls,
+        body[data-view="list"] .touch-controls {
+            display: none;
         }
         @media (max-width: 560px) {
             body {
@@ -97,14 +171,15 @@
             #ui {
                 font-size: 16px;
             }
-            .touch-control {
+            .touch-control,
+            .editor-button {
                 min-height: 52px;
                 font-size: 16px;
             }
         }
     </style>
 </head>
-<body>
+<body data-view="play-seeded">
     <div id="gameContainer">
         <h1>🧀 Cheeseworld 🐭</h1>
         <div id="ui">
@@ -118,10 +193,49 @@
             <button class="touch-control" type="button" data-control="jump" aria-label="Jump">Jump</button>
             <button class="touch-control" type="button" data-control="right" aria-label="Move right">Right</button>
         </div>
+        <div class="editor-grid only-seeded">
+            <button class="editor-button" type="button" id="makeLevel">Make a level</button>
+            <button class="editor-button" type="button" id="showLevels">My levels</button>
+        </div>
+        <div class="editor-grid only-custom">
+            <button class="editor-button" type="button" id="editCurrent">Edit</button>
+            <button class="editor-button" type="button" id="showLevelsFromPlay">My levels</button>
+            <button class="editor-button" type="button" id="restartCustom">Restart</button>
+        </div>
+        <div class="editor-grid only-edit" id="editorTools">
+            <div class="editor-heading">Build</div>
+            <button class="editor-button" type="button" data-tool="plain" aria-pressed="true">Plain</button>
+            <button class="editor-button" type="button" data-tool="wheel" aria-pressed="false">Cheese wheel</button>
+            <button class="editor-button" type="button" data-tool="books" aria-pressed="false">Book stack</button>
+            <button class="editor-button" type="button" data-tool="spring" aria-pressed="false">Mushroom</button>
+            <button class="editor-button" type="button" data-tool="mover" aria-pressed="false">Sliding tray</button>
+            <div class="editor-heading">Add</div>
+            <button class="editor-button" type="button" data-tool="cheese" aria-pressed="false">Cheese</button>
+            <button class="editor-button" type="button" data-tool="cat" aria-pressed="false">Cat</button>
+            <button class="editor-button" type="button" data-tool="oldman" aria-pressed="false">Old man</button>
+            <button class="editor-button" type="button" data-tool="dog" aria-pressed="false">Dog</button>
+            <button class="editor-button" type="button" data-tool="blackcat" aria-pressed="false">Black cat</button>
+            <button class="editor-button" type="button" data-tool="erase" aria-pressed="false">Erase</button>
+            <button class="editor-button" type="button" data-tool="move" aria-pressed="false">Move</button>
+            <div class="editor-heading">Level</div>
+            <button class="editor-button" type="button" id="editorPlay">Play</button>
+            <button class="editor-button" type="button" id="editorSave">Save</button>
+            <button class="editor-button" type="button" id="editorClear">Clear</button>
+            <button class="editor-button" type="button" id="editorBackground">Background</button>
+            <button class="editor-button" type="button" id="editorDone">Done</button>
+        </div>
+        <div class="editor-grid only-list">
+            <button class="editor-button" type="button" id="listBack">Back</button>
+        </div>
+        <ul id="levelList" aria-label="My levels"></ul>
+        <p id="editorStatus" role="status" aria-live="polite"></p>
         <div id="instructions">
             Keyboard: Arrow keys or WASD to move, Space or Up to jump. Touch: hold Left or Right and tap Jump.
+            Tap Make a level to build your own, then tap the picture to place things.
         </div>
     </div>
+    <script src="levels.js"></script>
     <script src="game.js"></script>
+    <script src="editor.js"></script>
 </body>
 </html>

@@ -14,7 +14,8 @@ const game = {
     gravity: 0.5,
     running: true,
     seed: 1,
-    damageCooldown: 0
+    damageCooldown: 0,
+    mode: 'seeded'
 };
 
 const STEP_MS = 1000 / 60;
@@ -22,6 +23,37 @@ const POWER_UP_MS = 5000;
 const DAMAGE_COOLDOWN_MS = 1000;
 const FLATTENED_MS = 1000;
 const SPAWN = { x: 100, y: 435 };
+const SPAWN_CLEAR = { x: 60, y: 360, w: 110, h: 100 };
+const SPRING_BOUNCE = 16;
+const MOVER_RANGE = 60;
+const MOVER_SPEED = 1;
+const LEVEL_LOG_PREFIX = 'CHEESEWORLD_LEVEL ';
+const LIMITS = { platforms: 20, cheeses: 30, enemies: 8, levels: 12 };
+// Level objects. Missing or unknown platform types are drawn and built as plain.
+const PLATFORM_TYPES = {
+    plain: { label: 'Plain', width: 140, height: 20 },
+    wheel: { label: 'Cheese wheel', width: 56, height: 56 },
+    books: { label: 'Book stack', width: 90, height: 50 },
+    spring: { label: 'Mushroom', width: 70, height: 30 },
+    mover: { label: 'Sliding tray', width: 120, height: 20 }
+};
+// Backgrounds a level can have, by number. 0 is the fridge the game shipped with.
+const BACKGROUNDS = ['Fridge', 'Pantry', 'Garden', 'Night'];
+const ENEMY_TYPES = {
+    cat: { width: 50, height: 40, speed: 1 },
+    oldman: { width: 35, height: 55, speed: 1.5 },
+    blackcat: { width: 50, height: 40, speed: 1 },
+    dog: { width: 30, height: 24, speed: 1.3 }
+};
+// A dog leaves poop behind as it walks: one every POOP_EVERY_MS, at most POOP_MAX of its own at a time.
+const POOP_EVERY_MS = 4000;
+const POOP_MAX = 3;
+const POOP_SIZE = { width: 14, height: 10 };
+// Reduced motion keeps the sliding tray still, so it is just a slab to stand on.
+const moverSpeed = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : MOVER_SPEED;
+
+// Which scene is drawn behind the level (an index into BACKGROUNDS)
+let background = 0;
 
 // Mouse player
 const mouse = {
@@ -55,6 +87,9 @@ let cheeses = [];
 // Enemies
 let enemies = [];
 
+// Poop dropped by dogs while a level is on screen (never stored in a level)
+let poops = [];
+
 function seededRandom(seed) {
     let state = seed >>> 0;
     return () => {
@@ -67,11 +102,71 @@ function levelSeed(levelNum) {
     return (game.seed + Math.imul(levelNum, 2654435761)) >>> 0;
 }
 
+// Level names: two made-up words, built only from this list. Nothing a child types is ever a name.
+const NAME_SYLLABLES = ['i', 'ru', 'ba', 'bu', 'zo', 'hi', 'gu', 'po', 'fi', 'ju',
+    'ku', 'lu', 'yo', 'wa', 'ze', 'se', 've', 'ho', 'he', 'ki'];
+
+function capitalise(text) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// A saved name is kept only if it matches this: two capitalised words of 2-3 listed syllables.
+const NAME_WORD = '(?:' + NAME_SYLLABLES.map(capitalise).join('|') + ')(?:' + NAME_SYLLABLES.join('|') + '){1,2}';
+const NAME_PATTERN = new RegExp('^' + NAME_WORD + ' ' + NAME_WORD + '$');
+
+// rng is any function that returns a number from 0 up to (not including) 1.
+function levelName(rng) {
+    let previous = -1;
+    const word = () => {
+        let text = '';
+        const count = 2 + Math.floor(rng() * 2);
+        for (let i = 0; i < count; i++) {
+            let pick = Math.floor(rng() * NAME_SYLLABLES.length);
+            if (pick === previous) pick = (pick + 1) % NAME_SYLLABLES.length;  // never "kaka"
+            previous = pick;
+            text += NAME_SYLLABLES[pick];
+        }
+        return capitalise(text);
+    };
+    const first = word();
+    return first + ' ' + word();
+}
+
+// The same level number always gets the same name.
+function seededLevelName(levelNum) {
+    const random = seededRandom((Math.imul(levelNum, 2654435761) ^ 0x5bd1e995) >>> 0);
+    random();
+    random();
+    return levelName(random);
+}
+
+// A name for a level shape that has none: the same shape always gets the same name.
+function shapeName(level) {
+    const text = JSON.stringify(level);
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+    const random = seededRandom(hash >>> 0);
+    random();
+    random();
+    return levelName(random);
+}
+
+// A fresh name for a level that is being saved for the first time.
+function newLevelName() {
+    return levelName(seededRandom(Math.floor(Math.random() * 4294967296)));
+}
+
+// Returns the level with a name, giving it one if it has none.
+function withName(level) {
+    return level.name ? level : { ...level, name: shapeName(level) };
+}
+
 // Initialize level
 function initLevel(levelNum) {
     platforms = [];
     cheeses = [];
     enemies = [];
+    poops = [];
 
     // Ground
     platforms.push({ x: 0, y: 460, width: 800, height: 40 });
@@ -201,7 +296,10 @@ function initLevel(levelNum) {
         }
     }
 
-    // Reset mouse position
+    resetMouse();
+}
+
+function resetMouse() {
     mouse.x = SPAWN.x;
     mouse.y = SPAWN.y;
     mouse.velX = 0;
@@ -211,6 +309,182 @@ function initLevel(levelNum) {
     mouse.speed = 5;
     game.damageCooldown = 0;
     powerUpDisplay.style.display = 'none';
+}
+
+// Levels made by hand (the editor, saved levels, default levels)
+// Saved shape: { platforms: [{ type, x, y }], cheeses: [{ x, y }], enemies: [{ type, x, p }], bg, name }.
+// bg is a background number 0-3; a missing or invalid one means 0 (the fridge).
+// name is optional and only ever a generated one: anything not matching NAME_PATTERN is dropped.
+// The ground is never stored; p is an index into platforms, or null for the ground.
+function hasType(table, type) {
+    return typeof type === 'string' && Object.prototype.hasOwnProperty.call(table, type);
+}
+
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
+// Area a platform can ever cover (a tray sweeps sideways)
+function footprint(plat) {
+    const size = PLATFORM_TYPES[plat.type];
+    const pad = plat.type === 'mover' ? MOVER_RANGE : 0;
+    return { x: plat.x - pad, y: plat.y, w: size.width + pad * 2, h: size.height };
+}
+
+function rectsOverlap(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+// True when a platform's area would cover this cheese, so it could never be collected.
+function coversCheese(plat, cheese) {
+    return rectsOverlap(footprint(plat), { x: cheese.x, y: cheese.y, w: 25, h: 20 });
+}
+
+// Clamp a platform into the room, then refuse it if the level has no space for it.
+// cheeses (optional) are the level's cheeses: a platform may not cover one.
+function canPlace(list, candidate, cheeses = []) {
+    const type = hasType(PLATFORM_TYPES, candidate.type) ? candidate.type : 'plain';
+    const size = PLATFORM_TYPES[type];
+    const pad = type === 'mover' ? MOVER_RANGE : 0;
+    const platform = {
+        type,
+        x: clamp(candidate.x, 8 + pad, 792 - size.width - pad),
+        y: clamp(candidate.y, 120, 420 - size.height)
+    };
+    if (list.length >= LIMITS.platforms) {
+        return { ok: false, message: LIMITS.platforms + ' platforms is the most.' };
+    }
+    const area = footprint(platform);
+    if (rectsOverlap(area, SPAWN_CLEAR)) {
+        return { ok: false, message: 'Keep the start clear.' };
+    }
+    if (list.some(other => rectsOverlap(area, footprint(other))) ||
+        cheeses.some(cheese => coversCheese(platform, cheese))) {
+        return { ok: false, message: 'That spot is taken.' };
+    }
+    return { ok: true, platform };
+}
+
+// Returns a clean copy of a level, or null. A bad level is rejected whole.
+function validateLevel(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const { platforms: rawPlatforms, cheeses: rawCheeses, enemies: rawEnemies } = raw;
+    if (!Array.isArray(rawPlatforms) || !Array.isArray(rawCheeses) || !Array.isArray(rawEnemies)) return null;
+    if (rawPlatforms.length > LIMITS.platforms || rawCheeses.length > LIMITS.cheeses ||
+        rawEnemies.length > LIMITS.enemies || rawCheeses.length === 0) return null;
+    const isObject = item => item && typeof item === 'object';
+
+    const level = { platforms: [], cheeses: [], enemies: [], bg: Number.isInteger(raw.bg) && raw.bg >= 0 && raw.bg < BACKGROUNDS.length ? raw.bg : 0 };
+    for (const item of rawCheeses) {
+        if (!isObject(item) || !Number.isFinite(item.x) || !Number.isFinite(item.y)) return null;
+        level.cheeses.push({ x: clamp(item.x, 8, 767), y: clamp(item.y, 20, 430) });
+    }
+    // A platform that covers a cheese is refused by canPlace, so the whole level is rejected.
+    for (const item of rawPlatforms) {
+        if (!isObject(item) || !Number.isFinite(item.x) || !Number.isFinite(item.y)) return null;
+        const placed = canPlace(level.platforms, item, level.cheeses);
+        if (!placed.ok) return null;
+        level.platforms.push(placed.platform);
+    }
+    for (const item of rawEnemies) {
+        if (!isObject(item) || !hasType(ENEMY_TYPES, item.type) || !Number.isFinite(item.x)) return null;
+        const onGround = item.p === null || item.p === undefined;
+        if (!onGround && !(Number.isInteger(item.p) && level.platforms[item.p] &&
+            level.platforms[item.p].type === 'plain')) return null;
+        const width = ENEMY_TYPES[item.type].width;
+        const x = onGround
+            ? clamp(item.x, 300, 700)
+            : clamp(item.x, level.platforms[item.p].x, level.platforms[item.p].x + PLATFORM_TYPES.plain.width - width);
+        level.enemies.push({ type: item.type, x, p: onGround ? null : item.p });
+    }
+    if (typeof raw.name === 'string' && NAME_PATTERN.test(raw.name)) level.name = raw.name;
+    return level;
+}
+
+// Build the three arrays from a valid saved level and put the mouse at the start.
+// Does not touch the game mode, score or level display.
+function applyLevelData(level) {
+    background = level.bg || 0;
+    platforms = [{ x: 0, y: 460, width: 800, height: 40 }];
+    level.platforms.forEach(item => {
+        const size = PLATFORM_TYPES[item.type];
+        const plat = { type: item.type, x: item.x, y: item.y, width: size.width, height: size.height };
+        if (item.type === 'mover') Object.assign(plat, { homeX: item.x, dir: 1, dx: 0 });
+        platforms.push(plat);
+    });
+    cheeses = level.cheeses.map(c => ({ x: c.x, y: c.y, width: 25, height: 20, collected: false }));
+    enemies = level.enemies.map(item => {
+        const size = ENEMY_TYPES[item.type];
+        const plat = item.p === null ? platforms[0] : platforms[item.p + 1];
+        const y = plat.y - size.height;
+        return {
+            type: item.type,
+            x: item.x,
+            y,
+            baseY: y,
+            width: size.width,
+            height: size.height,
+            originalHeight: size.height,
+            speed: size.speed,
+            direction: 1,
+            patrolMin: item.p === null ? 300 : plat.x,
+            patrolMax: item.p === null ? 700 : plat.x + plat.width - size.width,
+            frameTime: 0,
+            swingAngle: 0,
+            flattened: false,
+            flattenTimer: 0,
+            velY: 0,
+            jumping: false,
+            agitated: false,
+            platformY: plat.y,
+            ...(item.type === 'dog' ? { poopTimer: 0 } : {})
+        };
+    });
+    poops = [];
+    resetMouse();
+}
+
+// Default levels (levels.js): level N plays entry N; a bad entry is skipped.
+const presetLevels = Array.isArray(window.CHEESEWORLD_DEFAULT_LEVELS)
+    ? window.CHEESEWORLD_DEFAULT_LEVELS.map(validateLevel)
+    : [];
+presetLevels.forEach((preset, index) => {
+    if (!preset) console.warn('Cheese World: default level ' + (index + 1) + ' was skipped (not valid).');
+});
+
+function startLevel(levelNum) {
+    const preset = presetLevels[levelNum - 1];
+    if (preset) {
+        applyLevelData(preset);
+    } else {
+        initLevel(levelNum);
+    }
+    // Seeded levels take their scene from the level number; level 1 stays the fridge.
+    background = (levelNum - 1) % BACKGROUNDS.length;
+}
+
+// A made level plays on its own; the seeded run waits where it was.
+let seededRun = null;
+
+function loadCustomLevel(level) {
+    if (game.mode === 'seeded') seededRun = { score: game.score, level: game.level };
+    game.mode = 'custom';
+    game.score = 0;
+    scoreDisplay.textContent = game.score;
+    levelDisplay.textContent = level.name || 'Mine';
+    applyLevelData(level);
+}
+
+function startSeededRun() {
+    if (seededRun) {
+        game.score = seededRun.score;
+        game.level = seededRun.level;
+        seededRun = null;
+    }
+    game.mode = 'seeded';
+    scoreDisplay.textContent = game.score;
+    levelDisplay.textContent = seededLevelName(game.level);
+    startLevel(game.level);
 }
 
 // Draw the mouse character
@@ -332,8 +606,14 @@ function drawCheese(cheese) {
     ctx.fill();
 }
 
+// Cat colours: orange is the default; the black cat's body is near-black so it still reads on the Night scene.
+const CAT_PALETTES = {
+    cat: { body: '#ff8c00', stripe: '#cc6600', eyes: '#ffff00' },
+    blackcat: { body: '#2b2b36', stripe: '#16161d', eyes: '#c8ff00' }
+};
+
 // Draw cat enemy
-function drawCat(enemy) {
+function drawCat(enemy, palette = CAT_PALETTES.cat) {
     ctx.save();
     ctx.translate(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
 
@@ -346,13 +626,13 @@ function drawCat(enemy) {
     ctx.translate(-enemy.width / 2, -enemy.height / 2);
 
     // Body (orange oval)
-    ctx.fillStyle = '#ff8c00';
+    ctx.fillStyle = palette.body;
     ctx.beginPath();
     ctx.ellipse(enemy.width / 2, enemy.height / 2 + 5, enemy.width / 2 - 5, enemy.height / 2 - 5, 0, 0, Math.PI * 2);
     ctx.fill();
 
     // Stripes
-    ctx.strokeStyle = '#cc6600';
+    ctx.strokeStyle = palette.stripe;
     ctx.lineWidth = 3;
     for (let i = 0; i < 3; i++) {
         ctx.beginPath();
@@ -362,13 +642,13 @@ function drawCat(enemy) {
     }
 
     // Head
-    ctx.fillStyle = '#ff8c00';
+    ctx.fillStyle = palette.body;
     ctx.beginPath();
     ctx.arc(enemy.width - 10, enemy.height / 2 - 5, 15, 0, Math.PI * 2);
     ctx.fill();
 
     // Ears (triangles)
-    ctx.fillStyle = '#ff8c00';
+    ctx.fillStyle = palette.body;
     ctx.beginPath();
     ctx.moveTo(enemy.width - 20, enemy.height / 2 - 18);
     ctx.lineTo(enemy.width - 15, enemy.height / 2 - 8);
@@ -393,7 +673,7 @@ function drawCat(enemy) {
     ctx.fill();
 
     // Eyes (menacing)
-    ctx.fillStyle = '#ffff00';
+    ctx.fillStyle = palette.eyes;
     ctx.beginPath();
     ctx.ellipse(enemy.width - 14, enemy.height / 2 - 7, 4, 5, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -424,7 +704,7 @@ function drawCat(enemy) {
     ctx.stroke();
 
     // Tail
-    ctx.strokeStyle = '#ff8c00';
+    ctx.strokeStyle = palette.body;
     ctx.lineWidth = 5;
     ctx.lineCap = 'round';
     ctx.beginPath();
@@ -434,10 +714,80 @@ function drawCat(enemy) {
     ctx.stroke();
 
     // Legs
-    ctx.fillStyle = '#ff8c00';
+    ctx.fillStyle = palette.body;
     ctx.fillRect(10, enemy.height - 10, 8, 10);
     ctx.fillRect(30, enemy.height - 10, 8, 10);
 
+    ctx.restore();
+}
+
+// Draw the little white dog (30 x 24, head to the right)
+function drawDog(enemy) {
+    ctx.save();
+    ctx.translate(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
+    if (enemy.flattened) {
+        ctx.scale(enemy.direction * 1.5, 0.25);
+    } else {
+        ctx.scale(enemy.direction, 1);
+    }
+    ctx.translate(-enemy.width / 2, -enemy.height / 2);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#333340';
+    ctx.fillStyle = '#ffffff';
+
+    // Tail, wagging
+    const wag = Math.sin(enemy.frameTime * 0.4) * 4;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(4, 12);
+    ctx.lineTo(-3, 5 + wag);
+    ctx.stroke();
+    ctx.lineWidth = 1.5;
+
+    // Legs, body, head
+    ctx.fillRect(7, 19, 4, 5);
+    ctx.strokeRect(7, 19, 4, 5);
+    ctx.fillRect(19, 19, 4, 5);
+    ctx.strokeRect(19, 19, 4, 5);
+    ctx.beginPath();
+    ctx.ellipse(13, 15, 11, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(23, 9, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Dark ear, eye and nose
+    ctx.fillStyle = '#4a3b36';
+    ctx.beginPath();
+    ctx.ellipse(19, 6, 3, 5, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.arc(25, 7, 1.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(29, 10, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+}
+
+// Draw a poop: a brown swirl of three stacked blobs
+function drawPoop(poop) {
+    ctx.save();
+    ctx.translate(poop.x, poop.y);
+    ctx.fillStyle = '#6b4423';
+    ctx.strokeStyle = '#3f2813';
+    ctx.lineWidth = 1;
+    [[7, 8, 7, 2.5], [7, 5.5, 5, 2.5], [7, 3, 3, 2.2]].forEach(([x, y, rx, ry]) => {
+        ctx.beginPath();
+        ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+    });
     ctx.restore();
 }
 
@@ -570,10 +920,98 @@ function drawOldMan(enemy) {
     ctx.restore();
 }
 
+// Level objects besides the plain slab
+function drawWheel(plat) {
+    ctx.save();
+    ctx.fillStyle = '#f2b824';
+    ctx.strokeStyle = '#b9820f';
+    ctx.lineWidth = 3;
+    // A round wheel inside its box; the mouse collides with the circle, while placement still uses the box.
+    const radius = Math.min(plat.width, plat.height) / 2;
+    ctx.beginPath();
+    ctx.arc(plat.x + plat.width / 2, plat.y + plat.height / 2, radius - 1.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#d99a14';
+    [[0.35, 0.35, 5], [0.62, 0.62, 4], [0.68, 0.32, 3.5]].forEach(([fx, fy, r]) => {
+        ctx.beginPath();
+        ctx.arc(plat.x + plat.width * fx, plat.y + plat.height * fy, r, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.restore();
+}
+
+function drawBooks(plat) {
+    ctx.save();
+    const colors = ['#c0392b', '#2e86c1', '#27ae60'];
+    const rowHeight = plat.height / 3;
+    colors.forEach((color, i) => {
+        const inset = i === 1 ? 8 : 0;
+        const y = plat.y + i * rowHeight;
+        ctx.fillStyle = color;
+        ctx.fillRect(plat.x + inset, y, plat.width - inset, rowHeight);
+        ctx.fillStyle = '#f5ecd0';
+        ctx.fillRect(plat.x + inset + 6, y + 3, plat.width - inset - 8, rowHeight - 6);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+        ctx.fillRect(plat.x + inset, y, 5, rowHeight);
+    });
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(plat.x, plat.y, plat.width, plat.height);
+    ctx.restore();
+}
+
+function drawMushroom(plat) {
+    ctx.save();
+    ctx.fillStyle = '#f3e3c3';
+    ctx.fillRect(plat.x + plat.width * 0.35, plat.y + plat.height * 0.5, plat.width * 0.3, plat.height * 0.5);
+    ctx.fillStyle = '#d63a3a';
+    ctx.strokeStyle = '#8f1f1f';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(plat.x + plat.width / 2, plat.y + plat.height * 0.55, plat.width / 2, plat.height * 0.55, 0, Math.PI, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    [[0.25, 0.4, 4], [0.5, 0.2, 5], [0.75, 0.4, 4]].forEach(([fx, fy, r]) => {
+        ctx.beginPath();
+        ctx.arc(plat.x + plat.width * fx, plat.y + plat.height * fy, r, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.restore();
+}
+
+function drawTray(plat) {
+    ctx.save();
+    ctx.fillStyle = '#a0703c';
+    ctx.strokeStyle = '#5e3d1c';
+    ctx.lineWidth = 2;
+    ctx.fillRect(plat.x, plat.y, plat.width, plat.height);
+    ctx.strokeRect(plat.x, plat.y, plat.width, plat.height);
+    ctx.fillStyle = '#c28b52';
+    ctx.fillRect(plat.x, plat.y, plat.width, 5);
+    // Arrow cue: this one slides
+    ctx.fillStyle = '#f7e6c8';
+    ctx.beginPath();
+    ctx.moveTo(plat.x + plat.width / 2 - 14, plat.y + 12);
+    ctx.lineTo(plat.x + plat.width / 2 - 6, plat.y + 7);
+    ctx.lineTo(plat.x + plat.width / 2 - 6, plat.y + 17);
+    ctx.moveTo(plat.x + plat.width / 2 + 14, plat.y + 12);
+    ctx.lineTo(plat.x + plat.width / 2 + 6, plat.y + 7);
+    ctx.lineTo(plat.x + plat.width / 2 + 6, plat.y + 17);
+    ctx.fill();
+    ctx.restore();
+}
+
+const PLATFORM_DRAWERS = { wheel: drawWheel, books: drawBooks, spring: drawMushroom, mover: drawTray };
+
 // Draw platforms
 function drawPlatforms() {
     platforms.forEach((plat, index) => {
-        if (index === 0) {
+        if (index > 0 && hasType(PLATFORM_DRAWERS, plat.type)) {
+            PLATFORM_DRAWERS[plat.type](plat);
+        } else if (index === 0) {
             // Ground - darker cheese color
             ctx.fillStyle = '#c9a030';
             ctx.fillRect(plat.x, plat.y, plat.width, plat.height);
@@ -607,8 +1045,12 @@ function drawPlatforms() {
     });
 }
 
-// Draw background
-function drawBackground() {
+// Draw background: the scene a level has (see BACKGROUNDS)
+function drawBackground(bg = 0) {
+    [drawFridge, drawPantry, drawGarden, drawNight][bg]();
+}
+
+function drawFridge() {
     // Fridge interior - cool white/blue gradient
     const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
     gradient.addColorStop(0, '#e8f4f8');
@@ -678,12 +1120,184 @@ function drawBackground() {
     ctx.fillRect(120, 335, 15, 35);
 }
 
+// Pantry: dark wood wall, planks for shelves, jars and a flour sack
+function drawPantry() {
+    const wall = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    wall.addColorStop(0, '#7a5a3c');
+    wall.addColorStop(1, '#5c4029');
+    ctx.fillStyle = wall;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+    for (let x = 0; x < canvas.width; x += 50) ctx.fillRect(x, 0, 3, canvas.height);
+
+    // Three shelves, each with a row of jars
+    const jarColors = ['#c0392b', '#7fb069', '#e8a33d', '#8e6bbf'];
+    [150, 275, 395].forEach((y, row) => {
+        for (let i = 0; i < 6; i++) {
+            const x = 30 + i * 125 + (row % 2) * 55;
+            ctx.fillStyle = jarColors[(i + row) % jarColors.length];
+            ctx.globalAlpha = 0.55;
+            ctx.fillRect(x, y - 38, 30, 38);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = '#d8c9a8';
+            ctx.fillRect(x - 2, y - 44, 34, 8);
+        }
+        ctx.fillStyle = '#3e2a18';
+        ctx.fillRect(0, y, canvas.width, 8);
+        ctx.fillStyle = '#9b7348';
+        ctx.fillRect(0, y, canvas.width, 3);
+    });
+}
+
+// Garden: sky, sun, clouds, a green lawn and a picket fence
+function drawGarden() {
+    const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    sky.addColorStop(0, '#6ec6f0');
+    sky.addColorStop(1, '#c8ecfa');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#fff3a0';
+    ctx.beginPath();
+    ctx.arc(680, 90, 42, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    [[150, 80], [420, 140]].forEach(([x, y]) => {
+        ctx.beginPath();
+        ctx.arc(x, y, 24, 0, Math.PI * 2);
+        ctx.arc(x + 28, y + 6, 20, 0, Math.PI * 2);
+        ctx.arc(x - 28, y + 8, 18, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    ctx.fillStyle = '#4f9d4a';
+    ctx.fillRect(0, 380, canvas.width, canvas.height - 380);
+    ctx.fillStyle = '#6dbb5f';
+    ctx.fillRect(0, 380, canvas.width, 8);
+
+    // Picket fence
+    ctx.fillStyle = '#f4f1e8';
+    for (let x = 6; x < canvas.width; x += 36) {
+        ctx.beginPath();
+        ctx.moveTo(x, 330);
+        ctx.lineTo(x + 12, 318);
+        ctx.lineTo(x + 24, 330);
+        ctx.lineTo(x + 24, 400);
+        ctx.lineTo(x, 400);
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.fillStyle = '#d9d4c3';
+    ctx.fillRect(0, 345, canvas.width, 8);
+    ctx.fillRect(0, 375, canvas.width, 8);
+}
+
+// Night: a dark kitchen with a window showing the moon and stars
+function drawNight() {
+    const wall = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    wall.addColorStop(0, '#1b2347');
+    wall.addColorStop(1, '#2c3560');
+    ctx.fillStyle = wall;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Window
+    ctx.fillStyle = '#0c1230';
+    ctx.fillRect(270, 50, 260, 200);
+    ctx.fillStyle = '#fff6c8';
+    ctx.beginPath();
+    ctx.arc(450, 105, 26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#0c1230';
+    ctx.beginPath();
+    ctx.arc(462, 98, 24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    [[300, 80], [340, 140], [395, 70], [500, 190], [310, 210], [420, 170]].forEach(([x, y]) => {
+        ctx.fillRect(x, y, 3, 3);
+    });
+    ctx.fillStyle = '#5a6494';
+    ctx.fillRect(262, 42, 276, 8);
+    ctx.fillRect(262, 250, 276, 8);
+    ctx.fillRect(396, 50, 8, 200);
+    ctx.fillRect(270, 140, 260, 6);
+
+    // Cupboard edges
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.fillRect(0, 300, 200, 160);
+    ctx.fillRect(620, 300, 180, 160);
+    ctx.fillStyle = 'rgba(120, 130, 190, 0.35)';
+    ctx.fillRect(0, 300, 200, 4);
+    ctx.fillRect(620, 300, 180, 4);
+}
+
 // Collision detection
 function checkCollision(rect1, rect2) {
     return rect1.x < rect2.x + rect2.width &&
            rect1.x + rect1.width > rect2.x &&
            rect1.y < rect2.y + rect2.height &&
            rect1.y + rect1.height > rect2.y;
+}
+
+// The mouse against a round cheese wheel. The wheel is a circle here; placement still uses its box.
+const WHEEL_STAND_REACH = 0.75;  // share of the radius, either side of the middle, that can be stood on
+const WHEEL_FROM_ABOVE = 8;      // how far below the surface the feet may have been and still count as above it
+const WHEEL_SNAP = 6;            // feet this close above the surface settle onto it, so walking follows the curve
+const WHEEL_LEAVE_NUDGE = 0.5;   // the most a mouse walking off the edge is pushed sideways in one frame
+function collideWheel(mouse, plat) {
+    const radius = plat.width / 2;
+    const cx = plat.x + plat.width / 2;
+    const cy = plat.y + plat.height / 2;
+    const bottom = mouse.y + mouse.height;
+    const dx = mouse.x + mouse.width / 2 - cx;
+
+    // On top: the mouse stands with the middle of its feet on the arc.
+    if (Math.abs(dx) <= WHEEL_STAND_REACH * radius) {
+        const surface = cy - Math.sqrt(radius * radius - dx * dx);
+        const fromAbove = mouse.velY > 0
+            ? bottom - mouse.velY <= surface + WHEEL_FROM_ABOVE
+            : bottom <= surface + WHEEL_FROM_ABOVE;
+        if (fromAbove) {
+            if (mouse.velY > 0 && bottom >= surface - WHEEL_SNAP) {
+                mouse.y = surface - mouse.height;
+                mouse.velY = 0;
+                mouse.onGround = true;
+            }
+            return;
+        }
+    }
+
+    // Anywhere else: touching means the nearest point of the mouse is inside the circle.
+    const ex = Math.min(Math.max(cx, mouse.x), mouse.x + mouse.width) - cx;
+    const ey = Math.min(Math.max(cy, mouse.y), bottom) - cy;
+    if (ex * ex + ey * ey >= radius * radius) return;
+
+    // Rising into the underside stops at the lower arc.
+    if (mouse.velY < 0 && ey > 0) {
+        mouse.y = cy + Math.sqrt(radius * radius - ex * ex);
+        mouse.velY = 0;
+        return;
+    }
+    // Otherwise it is pushed sideways out of the circle, and gravity does the rest.
+    const clear = Math.sqrt(radius * radius - ey * ey);
+    const target = dx >= 0 ? cx + clear : cx - clear - mouse.width;
+    // A mouse already walking away from the wheel is nudged, not thrown: it is leaving on its own.
+    const leaving = mouse.velX !== 0 && (mouse.velX > 0) === (dx >= 0);
+    const shift = target - mouse.x;
+    mouse.x = leaving ? mouse.x + Math.max(-WHEEL_LEAVE_NUDGE, Math.min(WHEEL_LEAVE_NUDGE, shift)) : target;
+}
+
+// A dog leaves one poop at its back foot, resting on the surface it walks on.
+// A dog keeps at most POOP_MAX: the oldest of its own goes first.
+function dropPoop(dog) {
+    const own = poops.filter(p => p.owner === dog);
+    if (own.length >= POOP_MAX) poops.splice(poops.indexOf(own[0]), 1);
+    poops.push({
+        x: dog.direction > 0 ? dog.x : dog.x + dog.width - POOP_SIZE.width,
+        y: dog.baseY + dog.originalHeight - POOP_SIZE.height,
+        width: POOP_SIZE.width,
+        height: POOP_SIZE.height,
+        owner: dog
+    });
 }
 
 // Update game state
@@ -716,15 +1330,32 @@ function update(stepMs = STEP_MS) {
     if (mouse.x < 0) mouse.x = 0;
     if (mouse.x + mouse.width > canvas.width) mouse.x = canvas.width - mouse.width;
 
+    // Sliding trays move before the collision check
+    platforms.forEach(plat => {
+        if (plat.type !== 'mover') return;
+        plat.dx = moverSpeed * plat.dir;
+        plat.x += plat.dx;
+        if (Math.abs(plat.x - plat.homeX) >= MOVER_RANGE) {
+            plat.x = plat.homeX + MOVER_RANGE * plat.dir;
+            plat.dir = -plat.dir;
+        }
+    });
+
     // Platform collision
     mouse.onGround = false;
     platforms.forEach(plat => {
+        if (plat.type === 'wheel') {
+            collideWheel(mouse, plat);
+            return;
+        }
         if (checkCollision(mouse, plat)) {
             // Check if landing on top
             if (mouse.velY > 0 && mouse.y + mouse.height - mouse.velY <= plat.y + 5) {
                 mouse.y = plat.y - mouse.height;
-                mouse.velY = 0;
-                mouse.onGround = true;
+                // Mushrooms bounce; trays carry the mouse along
+                mouse.velY = plat.type === 'spring' ? -SPRING_BOUNCE : 0;
+                mouse.onGround = plat.type !== 'spring';
+                mouse.x += plat.dx || 0;
             }
             // Check if hitting from below
             else if (mouse.velY < 0 && mouse.y - mouse.velY >= plat.y + plat.height - 5) {
@@ -751,9 +1382,17 @@ function update(stepMs = STEP_MS) {
 
     // Check if all cheese collected
     if (cheeses.every(c => c.collected)) {
-        game.level++;
-        levelDisplay.textContent = game.level;
-        initLevel(game.level);
+        if (game.mode === 'custom') {
+            // A made level ends here; the editor shows the message.
+            if (game.running) {
+                game.running = false;
+                document.dispatchEvent(new CustomEvent('cheeseworld:won'));
+            }
+        } else {
+            game.level++;
+            levelDisplay.textContent = seededLevelName(game.level);
+            startLevel(game.level);
+        }
     }
 
     // Update power-up timer
@@ -836,6 +1475,15 @@ function update(stepMs = STEP_MS) {
             enemy.direction = -1;
         }
 
+        // A walking dog drops poop on a timer
+        if (enemy.type === 'dog') {
+            enemy.poopTimer += stepMs;
+            if (enemy.poopTimer >= POOP_EVERY_MS) {
+                enemy.poopTimer -= POOP_EVERY_MS;
+                dropPoop(enemy);
+            }
+        }
+
         // Check collision with mouse
         if (checkCollision(mouse, enemy)) {
             // Check if mouse is stomping from above
@@ -878,6 +1526,17 @@ function update(stepMs = STEP_MS) {
     // Remove flattened enemies
     enemies = enemies.filter(e => !e.removed);
 
+    // Poop hurts like an enemy hit (it cannot be stomped); a power-up walks over it
+    if (!mouse.powerUp && game.damageCooldown <= 0 && poops.some(poop => checkCollision(mouse, poop))) {
+        game.score = Math.max(0, game.score - 5);
+        scoreDisplay.textContent = game.score;
+        mouse.x = SPAWN.x;
+        mouse.y = SPAWN.y;
+        mouse.velX = 0;
+        mouse.velY = 0;
+        game.damageCooldown = DAMAGE_COOLDOWN_MS;
+    }
+
     // Fall off screen - reset position
     if (mouse.y > canvas.height) {
         mouse.x = SPAWN.x;
@@ -892,14 +1551,17 @@ function update(stepMs = STEP_MS) {
 
 // Render game
 function render() {
-    drawBackground();
+    drawBackground(background);
     drawPlatforms();
     cheeses.forEach(drawCheese);
+    poops.forEach(drawPoop);
 
     // Draw enemies
     enemies.forEach(enemy => {
-        if (enemy.type === 'cat') {
-            drawCat(enemy);
+        if (enemy.type === 'cat' || enemy.type === 'blackcat') {
+            drawCat(enemy, CAT_PALETTES[enemy.type]);
+        } else if (enemy.type === 'dog') {
+            drawDog(enemy);
         } else if (enemy.type === 'oldman') {
             drawOldMan(enemy);
         }
@@ -1024,8 +1686,55 @@ document.addEventListener('visibilitychange', () => {
     if (document.hidden) releaseAllControls();
 });
 
+window.cheeseworldGame = {
+    loadCustomLevel,
+    startSeededRun,
+    validateLevel,
+    withName,
+    newLevelName,
+    canPlace,
+    coversCheese,
+    LEVEL_LOG_PREFIX,
+    BACKGROUNDS,
+    releaseAllControls,
+    game,
+    PLATFORM_TYPES,
+    ENEMY_TYPES,
+    LIMITS,
+    SPAWN_CLEAR,
+    MOVER_RANGE
+};
+
 window.__cheeseworldTest = {
     initLevel,
+    startLevel,
+    render,
+    loadCustomLevel,
+    validateLevel,
+    canPlace,
+    levelName,
+    seededLevelName,
+    seededRandom,
+    NAME_SYLLABLES,
+    NAME_PATTERN,
+    PLATFORM_TYPES,
+    placeMouse(x, y, velY = 0) {
+        mouse.x = x;
+        mouse.y = y;
+        mouse.velY = velY;
+        mouse.onGround = false;
+    },
+    setScore(value) {
+        game.score = value;
+        scoreDisplay.textContent = value;
+    },
+    givePowerUp() {
+        mouse.powerUp = 'speed';
+        mouse.powerUpTimer = POWER_UP_MS;
+    },
+    setPlatforms(list) {
+        platforms = list;
+    },
     step(milliseconds) {
         const count = Math.round(milliseconds / STEP_MS);
         for (let i = 0; i < count; i++) update(STEP_MS);
@@ -1040,9 +1749,12 @@ window.__cheeseworldTest = {
     state() {
         return {
             game: { ...game },
+            background,
             mouse: { ...mouse },
             platforms: platforms.map(platform => ({ ...platform })),
+            cheeses: cheeses.map(cheese => ({ ...cheese })),
             enemies: enemies.map(enemy => ({ ...enemy })),
+            poops: poops.map(({ x, y, width, height }) => ({ x, y, width, height })),
             keys: { ...keys }
         };
     },
@@ -1067,5 +1779,6 @@ window.__cheeseworldTest = {
 };
 
 // Start game
-initLevel(1);
+levelDisplay.textContent = seededLevelName(1);
+startLevel(1);
 requestAnimationFrame(gameLoop);

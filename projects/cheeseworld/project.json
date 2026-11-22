@@ -1,6 +1,6 @@
 {
   "title": "Cheeseworld",
-  "summary": "A platform game about collecting cheese, leveling up, and dodging a cat and grumpy old man.",
+  "summary": "A platform game about collecting cheese, leveling up, and dodging a cat and grumpy old man, or building your own levels.",
   "description": "Move, jump, collect cheese, grab speed boosts, and survive the hazards in this mousey platformer.",
   "date": "2026-01-24",
   "dateSource": "earliest creation timestamp across project files",
@@ -14,10 +14,11 @@
   "ageRange": "8-12",
   "interaction": [
     "keyboard",
-    "touch"
+    "touch",
+    "pointer"
   ],
   "safety": {
-    "privacy": "Local-only play with no accounts, chat, sharing, or saved data.",
+    "privacy": "Local-only play. Levels a player makes are saved in this browser only: shapes of platforms, cheese and enemies, no names, accounts, chat, or sharing.",
     "adultHelp": "Adult preview may be useful for younger players because of cartoon hazards.",
     "notes": "Includes chasing and survival-style platformer hazards."
   },
@@ -25,7 +26,7 @@
     "type": "static",
     "requiresServer": false,
     "networkAccess": "none",
-    "storesData": false,
+    "storesData": true,
     "externalDependencies": []
   }
 }
