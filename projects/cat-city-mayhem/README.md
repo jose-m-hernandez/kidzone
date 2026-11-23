@@ -1,6 +1,4 @@
-# Cat City Rampage
-
-Status: work in progress. It is in the repo but not on the Kidzone shelf yet.
+# Cat City Mayhem
 
 Two mischievous cats race up a skyscraper, smashing and clawing their way to the top to grab the yarn ball.
 
@@ -25,7 +23,7 @@ First cat to reach the yarn at the top of the building wins!
 2. Move up by jumping and destroying bricks to clear a path
 3. Destroyed bricks stay gone (create shortcuts!)
 4. Reach the glowing yarn ball at the top to win
-5. No timers, no losing—just pure rampage chaos
+5. No timers and no game over, just pure mayhem
 
 ## Core Features
 
