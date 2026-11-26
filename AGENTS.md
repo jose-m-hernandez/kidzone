@@ -28,7 +28,8 @@ checks catch real breakage, not every edge case.
 Always hold:
 
 - Privacy and safety: no undeclared network, storage, camera, microphone, or
-  sharing. `check.mjs` enforces the declarations.
+  sharing. `check.mjs` checks the declarations it can see: external URLs,
+  camera use, file upload, and browser storage.
 - Declared inputs actually work. Don't list touch or keyboard in `project.json`
   unless you tried it.
 - Motion uses elapsed time or a fixed step, pauses when the tab is hidden, and

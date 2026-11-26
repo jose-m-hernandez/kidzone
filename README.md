@@ -30,7 +30,7 @@ helps someone make, solve, decorate, experiment, or learn.
 
 Kidzone is designed for parent-assisted coding. The repo favors:
 
-- Local-only play with no accounts or chat.
+- Play with no accounts or chat.
 - No public sharing features inside games.
 - Static projects that can run on GitHub Pages.
 - Clear project metadata for age fit, privacy, storage, network access, and
@@ -44,17 +44,17 @@ addresses, school names, private API keys, or open-ended communication features.
 
 Kids bring the idea. An AI coding agent builds a rough first draft. Then the kid and a parent iterate together: they play it, talk about how they want the game to work, and make refinements, with the parent reviewing and guiding each step. Kidzone is as much about that creative back-and-forth as it is about agentic coding.
 
-The guardrails follow the pattern that keeps production AI agents safe: say what the tool may do, check it automatically, and keep a person in the loop.
+The guardrails:
 
-- `skills/kidzone-new-game` starts every new game with questions: what the player does, what makes it fun, and what it must never do. A parent reviews the plan before anything is built. Measure twice, cut once.
+- `skills/kidzone-new-game` starts every new game with questions: what the player does, what makes it fun, and what it must never do. The skill writes a short parent review of the plan, and for riskier ideas stops for approval before building.
 - `skills/kidzone-game-iteration` handles changes to an existing game, one small pull request at a time.
 - `AGENTS.md` gives any agent the house rules: no network, storage, camera, microphone or sharing unless the project declares it, and controls that really work.
-- `scripts/check.mjs` enforces those declarations on every pull request, so a rule an agent forgets still gets caught.
-- Ten games have Playwright tests that play the main path, so a game that can't be won, or controls that stop working, turn up before a kid finds them.
+- `scripts/check.mjs` runs on every push and pull request (`.github/workflows/checks.yml`). It checks the declarations it can see: external URLs, camera use, file upload, and browser storage.
+- Most games have Playwright tests that play the main path, so a game that can't be won, or controls that stop working, turn up when someone runs them (see Run The Tests). CI runs only `check.mjs`, not these tests.
 
 ## Play Locally
 
-Run the static preview server from this folder:
+You need Node.js (tried with v24). Run the static preview server from this folder:
 
 ```sh
 node ./server.mjs
@@ -80,7 +80,7 @@ Create a project from the template:
 node ./scripts/new-project.mjs sky-catcher "Sky Catcher"
 ```
 
-This creates:
+This creates a real project folder and refreshes `projects/index.json`:
 
 ```text
 projects/sky-catcher/
@@ -89,6 +89,9 @@ projects/sky-catcher/
   README.md
   styles.css
 ```
+
+To undo the example, delete `projects/sky-catcher/` and run
+`node ./scripts/update-project-index.mjs`.
 
 Keep the project self-contained in its folder. Use relative links like
 `./styles.css`, `./assets/star.png`, and `../../` so the project works locally
@@ -116,22 +119,56 @@ The check looks for stale project metadata, JavaScript syntax errors, undeclared
 external URLs, and privacy-sensitive features that are missing from
 `project.json`.
 
-## Run The Browser Tests
+## Run The Tests
 
-Install the Playwright package and Chromium browser once:
+Logic tests use Node's built-in runner and need no install:
+
+```sh
+node --test
+```
+
+Browser tests use Playwright. Install the package and Chromium once (the
+Chromium download is about 90 MB):
 
 ```sh
 npm install
 npm run snapshots:install
 ```
 
-Capture a fresh screenshot of every published project:
+Run one game's browser tests:
 
 ```sh
-npm run snapshots
+npx playwright test tests/brush-max.spec.mjs --global-timeout=280000
+```
+
+`npm run snapshots` runs `playwright test`, which runs every spec in `tests/`,
+including the screenshot spec, and takes several minutes. To capture only a
+screenshot of every published project:
+
+```sh
+npx playwright test tests/project-snapshots.spec.mjs
 ```
 
 Screenshots are written to `snapshots/projects/`, which is ignored by Git.
+Playwright starts its own preview server on port 4173, or reuses one already
+running there.
+
+## What It Does Not Do
+
+- No accounts, chat, comments, or sharing features. No project code sends data
+  to a server of its own.
+- No backend. Every project is static (`runtime.type` in `project.json`);
+  `server.mjs` only serves the files on your computer.
+- Almost no saved data. Only Cheese World saves anything: the level shapes a
+  player builds, in this browser's `localStorage` (`cheeseworld.levels.v1`).
+  There is no typed text, and nothing leaves the browser. Every other project
+  has `runtime.storesData` set to `false`.
+- No hidden network use. Some games load a library from a public CDN (today
+  `splat-lab` and `world-of-poo`), so they need a connection;
+  `runtime.networkAccess` and `externalDependencies` in their `project.json`
+  say so.
+- No microphone. Camera and file upload appear only in games that list them
+  under `interaction` in `project.json`.
 
 ## Project Shape
 
